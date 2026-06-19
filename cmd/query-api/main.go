@@ -9,7 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/opentrace/opentrace/internal/database"
 	"github.com/opentrace/opentrace/internal/query-api/config"
+	"github.com/opentrace/opentrace/internal/query-api/handler"
+	queryrepo "github.com/opentrace/opentrace/internal/query-api/repository"
 	"github.com/opentrace/opentrace/internal/query-api/server"
 )
 
@@ -29,8 +32,22 @@ func main() {
 	}
 	cfg.Log(logger)
 
-	// TODO (Day 11): replace stub with real PostgresLogReadRepository
-	repo := &stubRepository{}
+	ctx := context.Background()
+
+	var repo handler.LogReadRepository
+
+	if cfg.DatabaseURL != "" {
+		pool, err := database.NewPool(ctx, cfg.DatabaseURL, logger)
+		if err != nil {
+			logger.Error("database connection failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		defer pool.Close()
+		repo = queryrepo.NewPostgresLogReadRepository(pool)
+	} else {
+		logger.Warn("QUERY_API_DATABASE_URL not set — using stub repository")
+		repo = &stubRepository{}
+	}
 
 	srv := server.New(cfg, repo, logger)
 

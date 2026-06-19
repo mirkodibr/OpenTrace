@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -52,7 +53,7 @@ func DecodeCursor(s string) (*LogsCursor, error) {
 
 // LogReadRepository is the read contract for the query-api.
 type LogReadRepository interface {
-	QueryLogs(r *http.Request, params *LogsQueryParams) ([]schema.LogEvent, error)
+	QueryLogs(ctx context.Context, params *LogsQueryParams) ([]schema.LogEvent, error)
 }
 
 // logsQueryResponse is the JSON envelope returned by GET /api/v1/logs.
@@ -80,7 +81,7 @@ func QueryLogs(repo LogReadRepository, logger *slog.Logger, defaultPageSize, max
 			return
 		}
 
-		events, err := repo.QueryLogs(r, params)
+		events, err := repo.QueryLogs(r.Context(), params)
 		if err != nil {
 			reqLogger.Error("query failed", slog.String("error", err.Error()))
 			schema.WriteProblem(w, schema.Problem{
