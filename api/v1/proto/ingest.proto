@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package opentrace.v1;
+
+option go_package = "github.com/opentrace/opentrace/api/v1/proto/gen;otpb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// =============================================================================
+// IngestService — high-throughput write plane for all three telemetry pillars.
+//
+// Field number reservation strategy:
+//   1–15   → frequently used fields (encode in 1 byte)
+//   16–2047 → less frequent fields (encode in 2 bytes)
+//   19000–19999 → reserved for future extensions; never reuse field numbers.
+// =============================================================================
+service IngestService {
+    // IngestLogs accepts a batch of structured log events.
+    // Use client-streaming for sustained high-throughput ingestion.
+    rpc IngestLogs(IngestLogsRequest) returns (IngestLogsResponse);
+
+    // StreamLogs enables long-lived streaming ingestion; preferred for SDKs.
+    rpc StreamLogs(stream IngestLogsRequest) returns (IngestLogsResponse);
+
+    // IngestMetrics accepts a batch of dimensional metric datapoints.
+    rpc IngestMetrics(IngestMetricsRequest) returns (IngestMetricsResponse);
+
+    // IngestTraces accepts a batch of distributed trace spans.
+    rpc IngestTraces(IngestTracesRequest) returns (IngestTracesResponse);
+}
+
+// =============================================================================
+// Logs
+// =============================================================================
+
+message IngestLogsRequest {
+    // resource_attributes apply to all events in this batch (e.g. host.name, service.name).
+    // Avoids repeating identical resource fields per event.
+    map<string, string> resource_attributes = 1;
+    repeated LogEvent events = 2;
+    string schema_url = 3;
+}
+
+message IngestLogsResponse {
+    string batch_id = 1;
+    int32  accepted = 2;
+    int32  rejected = 3;
+    repeated ValidationError errors = 4;
+}
+
+message LogEvent {
+    // Required fields (1–5 use 1-byte field encoding)
+    google.protobuf.Timestamp timestamp = 1;
+    string service_name = 2;
+    LogLevel severity = 3;
+    string body = 4;
+
+    // Optional correlation IDs
+    string trace_id = 5;
+    string span_id  = 6;
+
+    // Optional metadata
+    string severity_text = 7;
+    map<string, google.protobuf.Value> log_attributes = 8;
+    string schema_url = 9;
+
+    // Field numbers 10–18 reserved for future log event fields.
+    reserved 10 to 18;
+}
+
+enum LogLevel {
+    LOG_LEVEL_UNSPECIFIED = 0;
+    LOG_LEVEL_DEBUG = 1;
+    LOG_LEVEL_INFO  = 2;
+    LOG_LEVEL_WARN  = 3;
+    LOG_LEVEL_ERROR = 4;
+    LOG_LEVEL_FATAL = 5;
+}
+
+// =============================================================================
+// Metrics
+// =============================================================================
+
+message IngestMetricsRequest {
+    map<string, string> resource_attributes = 1;
+    repeated MetricDatapoint datapoints = 2;
+    string schema_url = 3;
+}
+
+message IngestMetricsResponse {
+    string batch_id = 1;
+    int32  accepted = 2;
+    int32  rejected = 3;
+    repeated ValidationError errors = 4;
+}
+
+message MetricDatapoint {
+    google.protobuf.Timestamp timestamp = 1;
+    string metric_name = 2;
+    MetricType metric_type = 3;
+    double value = 4;
+    map<string, string> labels = 5;
+    string unit = 6;
+}
+
+enum MetricType {
+    METRIC_TYPE_UNSPECIFIED = 0;
+    METRIC_TYPE_GAUGE       = 1;
+    METRIC_TYPE_COUNTER     = 2;
+    METRIC_TYPE_HISTOGRAM   = 3;
+    METRIC_TYPE_SUMMARY     = 4;
+}
+
+// =============================================================================
+// Traces
+// =============================================================================
+
+message IngestTracesRequest {
+    map<string, string> resource_attributes = 1;
+    repeated Span spans = 2;
+    string schema_url = 3;
+}
+
+message IngestTracesResponse {
+    string batch_id = 1;
+    int32  accepted = 2;
+    int32  rejected = 3;
+    repeated ValidationError errors = 4;
+}
+
+message Span {
+    string trace_id     = 1;
+    string span_id      = 2;
+    string parent_span_id = 3;  // empty for root spans
+    string service_name = 4;
+    string operation_name = 5;
+    google.protobuf.Timestamp start_time = 6;
+    google.protobuf.Timestamp end_time   = 7;
+    SpanStatus status = 8;
+    map<string, google.protobuf.Value> attributes = 9;
+    repeated SpanEvent events = 10;
+}
+
+enum SpanStatus {
+    SPAN_STATUS_UNSPECIFIED = 0;
+    SPAN_STATUS_OK          = 1;
+    SPAN_STATUS_ERROR       = 2;
+}
+
+message SpanEvent {
+    google.protobuf.Timestamp timestamp = 1;
+    string name = 2;
+    map<string, google.protobuf.Value> attributes = 3;
+}
+
+// =============================================================================
+// Shared
+// =============================================================================
+
+message ValidationError {
+    string field   = 1;
+    string message = 2;
+}

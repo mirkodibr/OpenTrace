@@ -1,0 +1,41 @@
+# Binaries
+bin/
+dist/
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+coverage.out
+coverage.html
+cpu.prof
+mem.prof
+trace.out
+
+# Environment
+.env
+*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Node / frontend
+node_modules/
+web/dist/
+web/.vite/
+
+# Docker
+.docker/
+
+# Generated
+api/v1/proto/gen/
+*.pb.go
+*_grpc.pb.go
+
+# Logs
+*.log

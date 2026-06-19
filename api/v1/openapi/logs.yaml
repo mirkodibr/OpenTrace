@@ -1,0 +1,317 @@
+openapi: "3.1.0"
+
+info:
+  title: OpenTrace Logs API
+  version: "1.0.0"
+  description: |
+    Write and read structured log events in the OpenTrace observability platform.
+
+    **Write plane:** POST /api/v1/logs — async, 202 Accepted, optimised for throughput.
+    **Read plane:** GET /api/v1/logs — cursor-based pagination, sub-100ms indexed queries.
+
+servers:
+  - url: http://localhost:8081
+    description: Local development (query-api)
+  - url: http://localhost:8080
+    description: Local development (collector-service)
+
+tags:
+  - name: Ingest
+    description: Write telemetry data
+  - name: Query
+    description: Read and filter telemetry data
+
+paths:
+
+  /api/v1/logs:
+
+    post:
+      operationId: ingestLogs
+      tags: [Ingest]
+      summary: Bulk ingest structured log events
+      description: |
+        Accepts a batch of up to 1,000 log events. Processing is asynchronous —
+        the endpoint validates the payload and returns 202 before the events are
+        committed to storage.
+
+        **Rate limits:** 429 with Retry-After when the collector queue is saturated.
+        **Size limit:** 5 MB per request; 413 if exceeded.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestLogsRequest"
+            examples:
+              minimal:
+                summary: Minimal valid batch
+                value:
+                  events:
+                    - timestamp: "2024-01-15T14:32:01.847Z"
+                      service_name: "payment-service"
+                      severity: "info"
+                      body: "Payment processed successfully"
+              full:
+                summary: Full event with all optional fields
+                value:
+                  events:
+                    - timestamp: "2024-01-15T14:32:01.847Z"
+                      service_name: "payment-service"
+                      severity: "error"
+                      body: "Payment gateway timeout"
+                      trace_id: "4bf92f3577b34da6a3ce929d0e0e4736"
+                      span_id: "00f067aa0ba902b7"
+                      resource_attributes:
+                        host.name: "prod-worker-1"
+                        k8s.pod.name: "payment-service-7d9b8c-xkp2l"
+                      log_attributes:
+                        user_id: "u_123456"
+                        payment_id: "pay_987654"
+                        http.status_code: 504
+                        duration_ms: 10043
+      responses:
+        "202":
+          description: Batch accepted for async processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestLogsResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    get:
+      operationId: queryLogs
+      tags: [Query]
+      summary: Query log events with filtering and pagination
+      description: |
+        Returns filtered log events using cursor-based (keyset) pagination.
+        Cursors are opaque base64 strings encoding (timestamp, id) pairs.
+
+        **Time range:** start_time and end_time are required; maximum range is 7 days.
+        **Pagination:** pass next_cursor from the previous response as cursor.
+                         next_cursor is null on the last page.
+      parameters:
+        - name: service_name
+          in: query
+          schema:
+            type: string
+          description: Exact match filter on service name
+        - name: level
+          in: query
+          schema:
+            type: string
+            enum: [debug, info, warn, error, fatal]
+          description: Filter by log severity level
+        - name: start_time
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: "Start of time range (RFC3339, inclusive)"
+        - name: end_time
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: "End of time range (RFC3339, inclusive). Maximum 7 days after start_time."
+        - name: keyword
+          in: query
+          schema:
+            type: string
+            maxLength: 256
+          description: Full-text search in the log message body
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Opaque pagination cursor from next_cursor of the previous response
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+          description: Number of events per page
+      responses:
+        "200":
+          description: Filtered log events
+          headers:
+            X-Query-Time-Ms:
+              schema:
+                type: integer
+              description: Server-side query execution time in milliseconds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogsQueryResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+
+  schemas:
+
+    LogEvent:
+      type: object
+      required: [timestamp, service_name, severity, body]
+      properties:
+        id:
+          type: string
+          readOnly: true
+          description: Assigned by the storage layer; not present in ingest requests
+        timestamp:
+          type: string
+          format: date-time
+          description: "Event creation time (RFC3339 UTC)"
+        received_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Time the event was written to storage
+        service_name:
+          type: string
+          maxLength: 255
+          description: "OTel resource attribute: service.name"
+        severity:
+          type: string
+          enum: [debug, info, warn, error, fatal]
+        severity_text:
+          type: string
+          description: Original severity string before normalization
+        body:
+          type: string
+          maxLength: 32768
+          description: The human-readable log message
+        trace_id:
+          type: string
+          description: OpenTelemetry trace_id (hex, no hyphens)
+        span_id:
+          type: string
+          description: OpenTelemetry span_id (hex, no hyphens)
+        resource_attributes:
+          type: object
+          additionalProperties: true
+          description: OTel resource attributes (host.name, k8s.pod.name, etc.)
+        log_attributes:
+          type: object
+          additionalProperties: true
+          maxProperties: 100
+          description: Event-level structured key-value attributes
+        schema_url:
+          type: string
+          description: OpenTelemetry schema URL
+
+    IngestLogsRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/LogEvent"
+
+    IngestLogsResponse:
+      type: object
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+          description: Unique identifier for this batch (use for support queries)
+        accepted:
+          type: integer
+          description: Number of events accepted for processing
+        estimated_processing_ms:
+          type: integer
+          description: Estimated time until events are queryable
+
+    LogsQueryResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEvent"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pagination cursor for the next page; null when no more pages exist
+        query_time_ms:
+          type: integer
+          description: Server-side query execution time in milliseconds
+
+    Problem:
+      type: object
+      description: RFC 7807 Problem Details
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        violations:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+  responses:
+
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    PayloadTooLarge:
+      description: Request body exceeds the 5 MB limit
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    ServiceUnavailable:
+      description: Collector queue at capacity; retry after backoff
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
