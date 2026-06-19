@@ -13,31 +13,35 @@ function lastHour(): TimeRange {
 }
 
 interface FilterState {
-  timeRange:   TimeRange;
-  serviceName: string;
-  level:       LogLevel | '';
-  keyword:     string;
+  timeRange:         TimeRange;
+  serviceName:       string;
+  level:             LogLevel | '';
+  keyword:           string;
+  refreshIntervalSec: number;
 
-  setTimeRange:   (range: TimeRange) => void;
-  setServiceName: (name: string) => void;
-  setLevel:       (level: LogLevel | '') => void;
-  setKeyword:     (keyword: string) => void;
-  resetFilters:   () => void;
+  setTimeRange:          (range: TimeRange) => void;
+  setServiceName:        (name: string) => void;
+  setLevel:              (level: LogLevel | '') => void;
+  setKeyword:            (keyword: string) => void;
+  setRefreshIntervalSec: (sec: number) => void;
+  resetFilters:          () => void;
 }
 
 const initialState = {
-  timeRange:   lastHour(),
-  serviceName: '',
-  level:       '' as LogLevel | '',
-  keyword:     '',
+  timeRange:          lastHour(),
+  serviceName:        '',
+  level:              '' as LogLevel | '',
+  keyword:            '',
+  refreshIntervalSec: 0,
 };
 
 export const useFilterStore = create<FilterState>((set) => ({
   ...initialState,
 
-  setTimeRange:   (range)   => set({ timeRange: range }),
-  setServiceName: (name)    => set({ serviceName: name }),
-  setLevel:       (level)   => set({ level }),
-  setKeyword:     (keyword) => set({ keyword }),
-  resetFilters:   ()        => set(initialState),
+  setTimeRange:          (range)  => set({ timeRange: range }),
+  setServiceName:        (name)   => set({ serviceName: name }),
+  setLevel:              (level)  => set({ level }),
+  setKeyword:            (keyword) => set({ keyword }),
+  setRefreshIntervalSec: (sec)    => set({ refreshIntervalSec: sec }),
+  resetFilters:          ()       => set(initialState),
 }));
