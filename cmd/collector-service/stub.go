@@ -1,16 +1,18 @@
 package main
 
 import (
-	"net/http"
+	"context"
 
 	"github.com/opentrace/opentrace/pkg/schema"
 )
 
 // stubRepository satisfies handler.LogRepository while the real PostgreSQL
-// persistence layer is implemented in Phase 1 (Day 10).
+// persistence layer is not yet wired (used when COLLECTOR_DATABASE_URL is absent).
 type stubRepository struct{}
 
-func (s *stubRepository) BulkInsert(_ *http.Request, events []schema.LogEvent) error {
+func (s *stubRepository) BulkInsert(_ context.Context, events []schema.LogEvent) error {
 	_ = events
 	return nil
 }
+
+func (s *stubRepository) Close() {}

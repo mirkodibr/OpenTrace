@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,10 +13,9 @@ import (
 	"github.com/opentrace/opentrace/pkg/schema"
 )
 
-// LogRepository is the persistence contract for log ingest. The real
-// implementation lives in the repository package; a stub is used in tests.
+// LogRepository is the persistence contract for log ingest.
 type LogRepository interface {
-	BulkInsert(r *http.Request, events []schema.LogEvent) error
+	BulkInsert(ctx context.Context, events []schema.LogEvent) error
 }
 
 // IngestLogs handles POST /api/v1/logs.
@@ -62,7 +62,7 @@ func IngestLogs(repo LogRepository, logger *slog.Logger, maxBatchSize int, maxPa
 			return
 		}
 
-		if err := repo.BulkInsert(r, req.Events); err != nil {
+		if err := repo.BulkInsert(r.Context(), req.Events); err != nil {
 			reqLogger.Error("bulk insert failed", slog.String("error", err.Error()))
 			schema.WriteProblem(w, schema.Problem{
 				Type:   "https://opentrace.io/errors/internal",

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,7 +22,7 @@ type mockLogRepo struct {
 	inserted  []schema.LogEvent
 }
 
-func (m *mockLogRepo) BulkInsert(_ *http.Request, events []schema.LogEvent) error {
+func (m *mockLogRepo) BulkInsert(_ context.Context, events []schema.LogEvent) error {
 	if m.insertErr != nil {
 		return m.insertErr
 	}
