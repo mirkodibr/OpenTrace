@@ -1,17 +1,13 @@
 import { useLogs, flattenLogPages } from '@/hooks/useLogs';
+import { useFilterStore } from '@/store/filterStore';
 import { LogTable } from '@/components/logs/LogTable';
+import { FilterBar } from '@/components/filters/FilterBar';
 import { ApiErrorBoundary } from '@/components/errors/ApiErrorBoundary';
+import type { LogLevel } from '@/types/api';
 import styles from './LogsPage.module.css';
 
-// Default time window: last 1 hour
-function defaultWindow() {
-  const end   = new Date();
-  const start = new Date(end.getTime() - 60 * 60 * 1000);
-  return { start, end };
-}
-
 function LogsContent() {
-  const { start, end } = defaultWindow();
+  const { timeRange, serviceName, level, keyword } = useFilterStore();
 
   const {
     data,
@@ -21,7 +17,14 @@ function LogsContent() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useLogs({ startTime: start, endTime: end, limit: 100 });
+  } = useLogs({
+    startTime:   timeRange.start,
+    endTime:     timeRange.end,
+    serviceName: serviceName || undefined,
+    level:       (level || undefined) as LogLevel | undefined,
+    keyword:     keyword || undefined,
+    limit:       100,
+  });
 
   if (isLoading) {
     return <div className={styles.state}>Loading…</div>;
@@ -51,6 +54,7 @@ export function LogsPage() {
       <div className={styles.header}>
         <h1 className={styles.title}>Logs</h1>
       </div>
+      <FilterBar />
       <ApiErrorBoundary>
         <LogsContent />
       </ApiErrorBoundary>
