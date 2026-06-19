@@ -1,0 +1,224 @@
+name: opentrace
+
+networks:
+  backend:
+    driver: bridge
+    internal: true
+  frontend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  clickhouse_data:
+  redpanda_data:
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — relational store for logs and metadata
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16.3-alpine
+    restart: unless-stopped
+    networks: [backend]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
+
+  # ---------------------------------------------------------------------------
+  # ClickHouse — columnar analytics store for high-throughput telemetry
+  # ---------------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.6-alpine
+    restart: unless-stopped
+    networks: [backend]
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./infra/clickhouse/init:/docker-entrypoint-initdb.d:ro
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1'"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "2.0"
+
+  # ---------------------------------------------------------------------------
+  # Redpanda — Kafka-compatible message broker for async ingestion
+  # ---------------------------------------------------------------------------
+  redpanda:
+    image: redpandadata/redpanda:v24.1.8
+    restart: unless-stopped
+    networks: [backend]
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --smp 1
+      - --memory 512M
+      - --mode dev-container
+      - --default-log-level=warn
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true'"]
+      start_period: 30s
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+          cpus: "1.0"
+
+  # ---------------------------------------------------------------------------
+  # Redpanda Console — web UI for inspecting topics
+  # ---------------------------------------------------------------------------
+  redpanda-console:
+    image: redpandadata/console:v2.6.0
+    restart: unless-stopped
+    networks: [backend, frontend]
+    ports:
+      - "8082:8080"
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+    volumes:
+      - ./infra/redpanda/console-config.yml:/tmp/config.yml:ro
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+
+  # ---------------------------------------------------------------------------
+  # Collector Service — receives SDK telemetry, publishes to Redpanda
+  # ---------------------------------------------------------------------------
+  collector-service:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.go
+      args:
+        SERVICE: collector-service
+    restart: unless-stopped
+    networks: [backend]
+    environment:
+      COLLECTOR_PORT: ${COLLECTOR_PORT}
+      COLLECTOR_LOG_LEVEL: ${COLLECTOR_LOG_LEVEL}
+      COLLECTOR_MAX_BATCH_SIZE: ${COLLECTOR_MAX_BATCH_SIZE}
+      COLLECTOR_MAX_PAYLOAD_BYTES: ${COLLECTOR_MAX_PAYLOAD_BYTES}
+      COLLECTOR_DATABASE_URL: ${COLLECTOR_DATABASE_URL}
+      REDPANDA_BROKERS: ${REDPANDA_BROKERS}
+      REDPANDA_LOGS_TOPIC: ${REDPANDA_LOGS_TOPIC}
+      ENVIRONMENT: ${ENVIRONMENT}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${COLLECTOR_PORT}/healthz || exit 1"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "1.0"
+
+  # ---------------------------------------------------------------------------
+  # Query API — serves filtered telemetry queries to the React frontend
+  # ---------------------------------------------------------------------------
+  query-api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.go
+      args:
+        SERVICE: query-api
+    restart: unless-stopped
+    networks: [backend, frontend]
+    environment:
+      QUERY_API_PORT: ${QUERY_API_PORT}
+      QUERY_API_LOG_LEVEL: ${QUERY_API_LOG_LEVEL}
+      QUERY_API_DATABASE_URL: ${QUERY_API_DATABASE_URL}
+      QUERY_API_DEFAULT_PAGE_SIZE: ${QUERY_API_DEFAULT_PAGE_SIZE}
+      QUERY_API_MAX_TIME_RANGE_DAYS: ${QUERY_API_MAX_TIME_RANGE_DAYS}
+      ENVIRONMENT: ${ENVIRONMENT}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${QUERY_API_PORT}/healthz || exit 1"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "1.0"
+
+  # ---------------------------------------------------------------------------
+  # OpenTrace UI — React SPA served via Nginx
+  # ---------------------------------------------------------------------------
+  opentrace-ui:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.ui
+    restart: unless-stopped
+    networks: [frontend]
+    ports:
+      - "${UI_PORT:-3000}:80"
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    depends_on:
+      query-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/health || exit 1"]
+      start_period: 15s
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.5"

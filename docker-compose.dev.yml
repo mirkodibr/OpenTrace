@@ -1,0 +1,33 @@
+# docker-compose override for local development.
+# Exposes internal service ports so you can connect with external tools
+# (psql, ClickHouse client, Redpanda rpk) without going through Docker networking.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#   # or: make up-dev
+
+name: opentrace
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  clickhouse:
+    ports:
+      - "8123:8123"   # HTTP interface (clickhouse-client, DBeaver)
+      - "9000:9000"   # native protocol
+
+  redpanda:
+    ports:
+      - "19092:19092" # external Kafka listener
+      - "18082:18082" # pandaproxy
+      - "18081:18081" # schema registry
+
+  collector-service:
+    ports:
+      - "8080:8080"
+
+  query-api:
+    ports:
+      - "8081:8081"

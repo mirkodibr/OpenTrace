@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+.github
+
+# Claude / AI tooling
+.claude
+
+# Development artifacts
+web/node_modules
+web/.vite
+web/dist
+
+# Go build cache
+**/*.test
+**/*.out
+
+# Documentation
+docs/
+*.md
+
+# Scripts (not needed in production image)
+scripts/
+
+# Environment files (secrets must never be in images)
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.vscode
+.idea
+*.swp
+.DS_Store
+Thumbs.db
