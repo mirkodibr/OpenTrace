@@ -46,8 +46,11 @@ END $$;
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS logs (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY,
-    trace_id            UUID,
-    span_id             UUID,
+    -- TEXT not UUID: OpenTelemetry trace/span IDs are 32-char hex strings
+    -- without hyphens; storing as UUID requires conversion overhead and rejects
+    -- valid OTel IDs that don't conform to the 8-4-4-4-12 UUID format.
+    trace_id            TEXT,
+    span_id             TEXT,
     timestamp           TIMESTAMPTZ NOT NULL,
     received_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     service_name        TEXT        NOT NULL,
@@ -57,6 +60,10 @@ CREATE TABLE IF NOT EXISTS logs (
     resource_attributes JSONB,
     log_attributes      JSONB,
     schema_url          TEXT,
+
+    -- Generated column for full-text search — stored on disk so queries use the
+    -- GIN index directly without recomputing to_tsvector on every scan.
+    body_tsv            TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', body)) STORED,
 
     -- Partition-local primary key: (timestamp, id) enforces uniqueness within a day.
     PRIMARY KEY (timestamp, id)
@@ -102,15 +109,34 @@ CREATE INDEX IF NOT EXISTS idx_logs_log_attributes
 CREATE INDEX IF NOT EXISTS idx_logs_resource_attributes
     ON logs USING GIN (resource_attributes jsonb_path_ops);
 
--- Full-text search on the log message body.
+-- Full-text search via the stored generated column (avoids recomputing tsvector).
 CREATE INDEX IF NOT EXISTS idx_logs_body_fts
-    ON logs USING GIN (to_tsvector('english', body));
+    ON logs USING GIN (body_tsv);
 
 -- BRIN index on received_at — nearly zero write overhead; useful for
 -- "show me everything ingested in the last N minutes" queries which access
 -- monotonically increasing blocks.
 CREATE INDEX IF NOT EXISTS idx_logs_received_at_brin
     ON logs USING BRIN (received_at);
+
+-- ---------------------------------------------------------------------------
+-- Autovacuum tuning for append-heavy workloads.
+-- Default autovacuum_vacuum_scale_factor = 0.2 means vacuum triggers at 20%
+-- dead tuples. For a 50M row partition that's 10M dead tuples before cleanup.
+-- Lowering scale_factor and cost_delay keeps dead tuple count bounded without
+-- impacting ingest throughput significantly.
+-- ---------------------------------------------------------------------------
+ALTER TABLE logs SET (
+    autovacuum_vacuum_scale_factor   = 0.01, -- trigger at 1% dead tuples
+    autovacuum_analyze_scale_factor  = 0.005,
+    autovacuum_vacuum_cost_delay     = 2,    -- ms; lower = more aggressive, less IO starvation
+    fillfactor                       = 90    -- 10% free space per page → HOT updates for JSONB
+);
+
+-- Statistics targets — higher values give the query planner better cardinality
+-- estimates for high-cardinality columns.
+ALTER TABLE logs ALTER COLUMN service_name SET STATISTICS 500;
+ALTER TABLE logs ALTER COLUMN severity     SET STATISTICS 200;
 
 -- ---------------------------------------------------------------------------
 -- Pre-create 30 daily partitions: today through today+29.
