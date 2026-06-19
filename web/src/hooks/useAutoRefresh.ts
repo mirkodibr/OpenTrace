@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { usePageVisibility } from './usePageVisibility';
 
 interface UseAutoRefreshOptions {
@@ -32,13 +32,16 @@ export function useAutoRefresh({ intervalMs, onRefresh, enabled }: UseAutoRefres
 }
 
 // Hook that wraps useAutoRefresh + manages the enabled/paused toggle state.
+// Uses React state (not a ref) so that pause/resume cause a re-render which
+// updates the dependency array in useAutoRefresh's effect — ensuring the
+// interval is correctly started/stopped rather than silently ignoring the change.
 export function usePolling(intervalMs: number, onRefresh: () => void) {
-  const enabled = useRef(true);
+  const [paused, setPaused] = useState(false);
 
-  const pause  = useCallback(() => { enabled.current = false; }, []);
-  const resume = useCallback(() => { enabled.current = true;  }, []);
+  const pause  = useCallback(() => setPaused(true),  []);
+  const resume = useCallback(() => setPaused(false), []);
 
-  useAutoRefresh({ intervalMs, onRefresh, enabled: enabled.current });
+  useAutoRefresh({ intervalMs, onRefresh, enabled: !paused });
 
   return { pause, resume };
 }

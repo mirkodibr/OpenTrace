@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -100,9 +101,9 @@ func TestBuildLogsQuery_ParameterNumbering(t *testing.T) {
 
 	q, args := buildLogsQuery(params)
 
-	// Verify $1, $2, $3, $4 are all present and in order.
+	// Verify $1..$n are all present. Use fmt.Sprintf so n >= 10 is handled correctly.
 	for i := 1; i <= len(args); i++ {
-		placeholder := "$" + string(rune('0'+i))
+		placeholder := fmt.Sprintf("$%d", i)
 		if !strings.Contains(q, placeholder) {
 			t.Errorf("placeholder %s not found in query: %s", placeholder, q)
 		}
