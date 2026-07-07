@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/opentrace/opentrace-go/internal/wire"
 )
 
 func TestFieldConstructors(t *testing.T) {
@@ -13,37 +15,37 @@ func TestFieldConstructors(t *testing.T) {
 		check func(t *testing.T, f Field)
 	}{
 		{"String", String("k", "v"), func(t *testing.T, f Field) {
-			if f.ftype != typeString || f.StringVal != "v" {
+			if f.Type != wire.TypeString || f.StringVal != "v" {
 				t.Errorf("String field = %+v", f)
 			}
 		}},
 		{"Int", Int("k", -7), func(t *testing.T, f Field) {
-			if f.ftype != typeInt64 || f.Int64Val != -7 {
+			if f.Type != wire.TypeInt64 || f.Int64Val != -7 {
 				t.Errorf("Int field = %+v", f)
 			}
 		}},
 		{"Int64", Int64("k", 1<<40), func(t *testing.T, f Field) {
-			if f.ftype != typeInt64 || f.Int64Val != 1<<40 {
+			if f.Type != wire.TypeInt64 || f.Int64Val != 1<<40 {
 				t.Errorf("Int64 field = %+v", f)
 			}
 		}},
 		{"Float64", Float64("k", 3.5), func(t *testing.T, f Field) {
-			if f.ftype != typeFloat64 || f.Float64Val != 3.5 {
+			if f.Type != wire.TypeFloat64 || f.Float64Val != 3.5 {
 				t.Errorf("Float64 field = %+v", f)
 			}
 		}},
 		{"Bool", Bool("k", true), func(t *testing.T, f Field) {
-			if f.ftype != typeBool || !f.BoolVal {
+			if f.Type != wire.TypeBool || !f.BoolVal {
 				t.Errorf("Bool field = %+v", f)
 			}
 		}},
 		{"Duration", Duration("k", 1500*time.Millisecond), func(t *testing.T, f Field) {
-			if f.ftype != typeDuration || f.Int64Val != int64(1500*time.Millisecond) {
+			if f.Type != wire.TypeDuration || f.Int64Val != int64(1500*time.Millisecond) {
 				t.Errorf("Duration field = %+v", f)
 			}
 		}},
 		{"Any", Any("k", struct{ X int }{X: 1}), func(t *testing.T, f Field) {
-			if f.ftype != typeAny || f.Interface == nil {
+			if f.Type != wire.TypeAny || f.Interface == nil {
 				t.Errorf("Any field = %+v", f)
 			}
 		}},
@@ -61,7 +63,7 @@ func TestFieldConstructors(t *testing.T) {
 func TestErrField(t *testing.T) {
 	sentinel := errors.New("boom")
 	f := Err(sentinel)
-	if f.Key != "error" || f.ftype != typeError {
+	if f.Key != "error" || f.Type != wire.TypeError {
 		t.Errorf("Err field = %+v", f)
 	}
 	if f.StringVal != "boom" {
@@ -73,7 +75,7 @@ func TestErrField(t *testing.T) {
 
 	// nil error degrades to a string field, never panics.
 	f = Err(nil)
-	if f.Key != "error" || f.ftype != typeString || f.StringVal != "<nil>" {
+	if f.Key != "error" || f.Type != wire.TypeString || f.StringVal != "<nil>" {
 		t.Errorf("Err(nil) field = %+v", f)
 	}
 }

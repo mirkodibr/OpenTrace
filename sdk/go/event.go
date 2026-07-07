@@ -1,12 +1,7 @@
 package opentrace
 
-import "time"
+import "github.com/opentrace/opentrace-go/internal/wire"
 
 // LogEvent is the internal wire type passed from the hot path to the
-// background exporter. It is managed via sync.Pool to minimise allocations.
-type LogEvent struct {
-	Level     Level
-	Message   string
-	Timestamp time.Time
-	Fields    []Field // pre-allocated slice; len reset on release, cap retained
-}
+// background exporter. Defined in internal/wire (ADR-005 D3).
+type LogEvent = wire.LogEvent
