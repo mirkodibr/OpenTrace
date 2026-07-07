@@ -27,42 +27,37 @@ func captureResource(cfg *Config) resourceInfo {
 	}
 }
 
-// otelTraceContextKey is the interface type used by the OpenTelemetry Go SDK
-// to store span context in a context.Context. We use interface assertion
-// rather than importing the full OTel SDK to keep the dependency footprint
-// minimal for non-OTel users.
-type otelSpanContextKey struct{}
-
-// extractTraceContext extracts trace_id and span_id from ctx without importing
-// the OpenTelemetry SDK. Returns empty strings when no span is present.
+// traceContextKey is the SDK's own context key for trace correlation IDs.
 //
-// Compatible with github.com/open-telemetry/opentelemetry-go span context
-// stored under the standard context key.
-func extractTraceContext(ctx context.Context) (traceID, spanID string) {
-	// Type-assert against the OTel SpanContext interface.
-	// This compiles even when the OTel SDK is not in the dependency graph.
-	type spanContextCarrier interface {
-		TraceID() [16]byte
-		SpanID() [8]byte
-		IsValid() bool
-	}
-	if sc, ok := ctx.Value(otelSpanContextKey{}).(spanContextCarrier); ok && sc.IsValid() {
-		tid := sc.TraceID()
-		sid := sc.SpanID()
-		return hexEncodeBytes(tid[:]), hexEncodeBytes(sid[:])
-	}
-	return "", ""
+// The OpenTelemetry SDK stores its span context under a key type that is
+// unexported from otel/trace, so it is impossible to read it without
+// importing that module. Rather than ship dead code that pretends to,
+// the SDK defines its own carrier: applications (or a thin OTel bridge)
+// call ContextWithTrace to make IDs visible to WithContext.
+type traceContextKey struct{}
+
+type traceContext struct {
+	traceID string
+	spanID  string
 }
 
-// hexEncodeBytes encodes b as a lowercase hex string without importing
-// encoding/hex to avoid unnecessary allocations in the common case where
-// trace context is absent.
-func hexEncodeBytes(b []byte) string {
-	const hextable = "0123456789abcdef"
-	dst := make([]byte, len(b)*2)
-	for i, v := range b {
-		dst[i*2] = hextable[v>>4]
-		dst[i*2+1] = hextable[v&0x0f]
+// ContextWithTrace returns a copy of ctx carrying the given trace and span
+// IDs. Loggers derived via WithContext from the returned context attach the
+// IDs as trace_id / span_id fields on every event.
+//
+// Applications using OpenTelemetry can bridge in one line:
+//
+//	sc := trace.SpanContextFromContext(ctx)
+//	ctx = opentrace.ContextWithTrace(ctx, sc.TraceID().String(), sc.SpanID().String())
+func ContextWithTrace(ctx context.Context, traceID, spanID string) context.Context {
+	return context.WithValue(ctx, traceContextKey{}, traceContext{traceID: traceID, spanID: spanID})
+}
+
+// extractTraceContext reads IDs previously stored by ContextWithTrace.
+// Returns empty strings when the context carries no trace information.
+func extractTraceContext(ctx context.Context) (traceID, spanID string) {
+	if tc, ok := ctx.Value(traceContextKey{}).(traceContext); ok {
+		return tc.traceID, tc.spanID
 	}
-	return string(dst)
+	return "", ""
 }

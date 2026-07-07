@@ -18,6 +18,7 @@ package opentrace
 import (
 	"context"
 	"sync/atomic"
+	"time"
 )
 
 // Logger is the primary entry point for emitting telemetry. All methods are
@@ -139,6 +140,7 @@ func (l *Logger) log(level Level, msg string, fields []Field) {
 	evt := acquireEvent()
 	evt.Level = level
 	evt.Message = msg
+	evt.Timestamp = time.Now()
 	// Merge pre-set fields with call-site fields.
 	evt.Fields = append(evt.Fields[:0], l.fields...)
 	evt.Fields = append(evt.Fields, fields...)

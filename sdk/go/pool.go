@@ -1,6 +1,9 @@
 package opentrace
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // eventPool holds recycled LogEvent structs. The pre-allocated Fields slice
 // capacity (16) covers the typical structured log call without growth copies.
@@ -18,10 +21,20 @@ func acquireEvent() *LogEvent {
 }
 
 // releaseEvent resets e and returns it to the pool.
-// The caller must not access e after calling releaseEvent.
+//
+// Ownership rule (ADR-005 D2): a *LogEvent has exactly one owner at any time —
+// the hot path until enqueue, the buffer/batcher after enqueue, the exporter
+// after flush. Only the current owner may call releaseEvent, and the caller
+// must not access e afterwards. The exporter releases events immediately after
+// serialisation, before any network I/O.
 func releaseEvent(e *LogEvent) {
+	e.Level = 0
 	e.Message = ""
-	e.Fields = e.Fields[:0] // retain backing array, zero length
-	e.Timestamp = e.Timestamp.Truncate(0) // zero without deallocation
+	// Zero the used field slots so string/interface references from the
+	// previous call do not outlive it (data-leak prevention), then reset
+	// length while retaining the backing array.
+	clear(e.Fields)
+	e.Fields = e.Fields[:0]
+	e.Timestamp = time.Time{}
 	eventPool.Put(e)
 }
