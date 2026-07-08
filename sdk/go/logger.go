@@ -39,11 +39,14 @@ type Logger struct {
 // It returns an error if the configuration is invalid or the exporter cannot
 // be initialised. Goroutines are only started after successful validation.
 func New(opts ...Option) (*Logger, error) {
+	// Precedence (lowest to highest): defaults → environment → options.
+	// Environment is applied before options so an explicit programmatic
+	// option always beats an ambient env var.
 	cfg := defaultConfig()
+	loadFromEnv(cfg)
 	for _, o := range opts {
 		o(cfg)
 	}
-	loadFromEnv(cfg)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

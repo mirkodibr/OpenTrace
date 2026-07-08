@@ -83,8 +83,22 @@ func (c *Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// loadFromEnv populates zero-value Config fields from environment variables.
-// Programmatic options (already set) take priority — this only fills gaps.
+// loadFromEnv overlays environment variables onto the defaults. It runs
+// BEFORE functional options are applied (see New), so the effective
+// precedence is: programmatic options > environment variables > defaults.
+//
+//	| Env var                      | Config field      | Type      |
+//	|------------------------------|-------------------|-----------|
+//	| OPENTRACE_COLLECTOR_ENDPOINT | CollectorEndpoint | string    |
+//	| OPENTRACE_SERVICE_NAME       | ServiceName       | string    |
+//	| OPENTRACE_SERVICE_VERSION    | ServiceVersion    | string    |
+//	| OPENTRACE_ENVIRONMENT        | Environment       | string    |
+//	| OPENTRACE_MIN_LEVEL          | MinLevel          | level name|
+//	| OPENTRACE_BATCH_SIZE         | BatchSize         | int       |
+//	| OPENTRACE_BATCH_INTERVAL_MS  | BatchInterval     | int (ms)  |
+//	| OPENTRACE_BUFFER_SIZE        | BufferSize        | int       |
+//	| OPENTRACE_HTTP_TIMEOUT_MS    | HTTPTimeout       | int (ms)  |
+//	| OPENTRACE_DEBUG              | Debug             | true/1    |
 func loadFromEnv(cfg *Config) {
 	if cfg.CollectorEndpoint == "" {
 		cfg.CollectorEndpoint = os.Getenv("OPENTRACE_COLLECTOR_ENDPOINT")
