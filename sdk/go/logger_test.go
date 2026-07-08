@@ -3,6 +3,7 @@ package opentrace
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -11,9 +12,11 @@ import (
 // pipeline, so tests can inspect enqueued events directly via drainBuffer.
 func newTestLogger(level Level, bufferCap int) *Logger {
 	return &Logger{
-		level:  level,
-		buffer: newEventBuffer(bufferCap),
-		res:    resourceInfo{ServiceName: "test-service"},
+		level:   level,
+		buffer:  newEventBuffer(bufferCap),
+		res:     resourceInfo{ServiceName: "test-service"},
+		dropped: &atomic.Int64{},
+		closed:  &atomic.Bool{},
 	}
 }
 

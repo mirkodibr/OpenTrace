@@ -3,18 +3,14 @@ package opentrace
 import (
 	"context"
 	"os"
+
+	"github.com/opentrace/opentrace-go/internal/wire"
 )
 
 // resourceInfo holds host/process attributes captured once at SDK init.
 // These are attached to every exported event without repeating the syscalls
-// on the hot path.
-type resourceInfo struct {
-	ServiceName    string
-	ServiceVersion string
-	Environment    string
-	Hostname       string
-	PID            int
-}
+// on the hot path. Defined in internal/wire so the exporter can serialise it.
+type resourceInfo = wire.Resource
 
 func captureResource(cfg *Config) resourceInfo {
 	hostname, _ := os.Hostname()
