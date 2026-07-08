@@ -17,9 +17,9 @@ type Config struct {
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
 
-	DatabaseURL     string
-	DBMaxConns      int
-	DefaultPageSize int
+	DatabaseURL      string
+	DBMaxConns       int
+	DefaultPageSize  int
 	MaxTimeRangeDays int
 
 	LogLevel    string

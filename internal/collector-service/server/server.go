@@ -26,11 +26,14 @@ type Server struct {
 func New(cfg *config.Config, repo handler.LogRepository, logger *slog.Logger) *Server {
 	r := chi.NewRouter()
 
-	// Middleware chain — order is significant
+	// Middleware chain — order is significant. Decompress runs before the
+	// ingest handler so its http.MaxBytesReader bounds DECOMPRESSED bytes
+	// (gzip-bomb defence, see middleware.Decompress).
 	r.Use(chimw.RealIP)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logging(logger))
 	r.Use(middleware.Recovery(logger))
+	r.Use(middleware.Decompress)
 
 	// Routes
 	r.Get("/healthz", handler.Health)

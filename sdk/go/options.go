@@ -32,6 +32,8 @@ func WithMinLevel(level Level) Option {
 }
 
 // WithBatchSize sets the maximum number of events per export batch.
+// The collector rejects batches above its own limit (1000 by default), so
+// values above that will surface as HTTP 400 responses — see ADR-006.
 func WithBatchSize(size int) Option {
 	return func(c *Config) { c.BatchSize = size }
 }

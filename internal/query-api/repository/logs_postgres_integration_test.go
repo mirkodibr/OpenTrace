@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	writerepo "github.com/opentrace/opentrace/internal/collector-service/repository"
 	"github.com/opentrace/opentrace/internal/database"
 	queryhandler "github.com/opentrace/opentrace/internal/query-api/handler"
 	queryrepo "github.com/opentrace/opentrace/internal/query-api/repository"
-	writerepo "github.com/opentrace/opentrace/internal/collector-service/repository"
 	"github.com/opentrace/opentrace/pkg/schema"
 )
 

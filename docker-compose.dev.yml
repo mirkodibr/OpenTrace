@@ -2,6 +2,12 @@
 # Exposes internal service ports so you can connect with external tools
 # (psql, ClickHouse client, Redpanda rpk) without going through Docker networking.
 #
+# The base file declares the backend network as `internal: true`, which makes
+# Docker silently ignore published ports for containers attached only to it.
+# Each service exposed here is therefore ALSO attached to the (non-internal)
+# frontend network — dev only; production keeps them backend-internal behind
+# the edge ingress.
+#
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 #   # or: make up-dev
@@ -10,21 +16,25 @@ name: opentrace
 
 services:
   postgres:
+    networks: [backend, frontend]
     ports:
       - "5432:5432"
 
   clickhouse:
+    networks: [backend, frontend]
     ports:
       - "8123:8123"   # HTTP interface (clickhouse-client, DBeaver)
       - "9000:9000"   # native protocol
 
   redpanda:
+    networks: [backend, frontend]
     ports:
       - "19092:19092" # external Kafka listener
       - "18082:18082" # pandaproxy
       - "18081:18081" # schema registry
 
   collector-service:
+    networks: [backend, frontend]
     ports:
       - "8080:8080"
 

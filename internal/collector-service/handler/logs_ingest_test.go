@@ -76,10 +76,10 @@ func decodeProblem(t *testing.T, rr *httptest.ResponseRecorder) schema.Problem {
 
 func TestIngestLogs(t *testing.T) {
 	tests := []struct {
-		name           string
-		buildBody      func() any
-		wantStatus     int
-		wantViolation  string // field path that must appear in violations (empty = skip check)
+		name          string
+		buildBody     func() any
+		wantStatus    int
+		wantViolation string // field path that must appear in violations (empty = skip check)
 	}{
 		{
 			name: "valid batch of 3 events",
@@ -93,9 +93,9 @@ func TestIngestLogs(t *testing.T) {
 			wantStatus: http.StatusAccepted,
 		},
 		{
-			name:       "empty events array",
-			buildBody:  func() any { return map[string]any{"events": []any{}} },
-			wantStatus: http.StatusBadRequest,
+			name:          "empty events array",
+			buildBody:     func() any { return map[string]any{"events": []any{}} },
+			wantStatus:    http.StatusBadRequest,
 			wantViolation: "events",
 		},
 		{

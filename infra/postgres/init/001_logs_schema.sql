@@ -125,13 +125,12 @@ CREATE INDEX IF NOT EXISTS idx_logs_received_at_brin
 -- dead tuples. For a 50M row partition that's 10M dead tuples before cleanup.
 -- Lowering scale_factor and cost_delay keeps dead tuple count bounded without
 -- impacting ingest throughput significantly.
+--
+-- PostgreSQL does not allow storage parameters on a partitioned (parent)
+-- table — "cannot specify storage parameters for a partitioned table" — so
+-- these settings are applied per partition at creation time (see the WITH
+-- clause in the partition DO block and create_log_partition below).
 -- ---------------------------------------------------------------------------
-ALTER TABLE logs SET (
-    autovacuum_vacuum_scale_factor   = 0.01, -- trigger at 1% dead tuples
-    autovacuum_analyze_scale_factor  = 0.005,
-    autovacuum_vacuum_cost_delay     = 2,    -- ms; lower = more aggressive, less IO starvation
-    fillfactor                       = 90    -- 10% free space per page → HOT updates for JSONB
-);
 
 -- Statistics targets — higher values give the query planner better cardinality
 -- estimates for high-cardinality columns.
@@ -163,7 +162,11 @@ BEGIN
               AND n.nspname = 'public'
         ) THEN
             EXECUTE format(
-                'CREATE TABLE %I PARTITION OF logs FOR VALUES FROM (%L) TO (%L)',
+                'CREATE TABLE %I PARTITION OF logs FOR VALUES FROM (%L) TO (%L) '
+                'WITH (autovacuum_vacuum_scale_factor = 0.01, '
+                '      autovacuum_analyze_scale_factor = 0.005, '
+                '      autovacuum_vacuum_cost_delay = 2, '
+                '      fillfactor = 90)',
                 partition_name, start_ts, end_ts
             );
         END IF;
@@ -189,7 +192,11 @@ BEGIN
         WHERE c.relname = partition_name AND n.nspname = 'public'
     ) THEN
         EXECUTE format(
-            'CREATE TABLE %I PARTITION OF logs FOR VALUES FROM (%L) TO (%L)',
+            'CREATE TABLE %I PARTITION OF logs FOR VALUES FROM (%L) TO (%L) '
+            'WITH (autovacuum_vacuum_scale_factor = 0.01, '
+            '      autovacuum_analyze_scale_factor = 0.005, '
+            '      autovacuum_vacuum_cost_delay = 2, '
+            '      fillfactor = 90)',
             partition_name, start_ts, end_ts
         );
         RAISE NOTICE 'Created partition: %', partition_name;

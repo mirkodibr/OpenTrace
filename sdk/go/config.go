@@ -35,14 +35,17 @@ type Config struct {
 
 func defaultConfig() *Config {
 	return &Config{
-		ServiceVersion:     "unknown",
-		Environment:        "production",
-		MinLevel:           LevelInfo,
-		BatchSize:          500,
-		BatchInterval:      2 * time.Second,
-		MaxBatchBytes:      1 * 1024 * 1024, // 1 MB
-		BufferSize:         10000,
-		HTTPTimeout:        10 * time.Second,
+		ServiceVersion: "unknown",
+		Environment:    "production",
+		MinLevel:       LevelInfo,
+		BatchSize:      500,
+		BatchInterval:  2 * time.Second,
+		MaxBatchBytes:  1 * 1024 * 1024, // 1 MB
+		BufferSize:     10000,
+		// 8s, deliberately below the collector's 10s WriteTimeout: the
+		// client must time out first so retries key off a clean client-side
+		// deadline instead of a half-written server response (ADR-006).
+		HTTPTimeout:        8 * time.Second,
 		MaxRetries:         5,
 		Headers:            map[string]string{},
 		CompressionEnabled: true,
