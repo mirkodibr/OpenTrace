@@ -2,13 +2,40 @@ package opentrace
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/opentrace/opentrace-go/internal/batcher"
 	"github.com/opentrace/opentrace-go/internal/exporter"
+	"github.com/opentrace/opentrace-go/internal/retry"
 	"github.com/opentrace/opentrace-go/internal/wire"
 )
+
+// newSendPolicy composes the transmission policy applied around every batch
+// POST: a circuit breaker (host protection during collector outages, ADR-005
+// data-loss point 3) wrapping exponential-backoff retries with jitter
+// (data-loss point 4).
+func newSendPolicy(cfg *Config) func(context.Context, func(context.Context) error) error {
+	backoff := retry.BackoffConfig{
+		BaseDelay:   100 * time.Millisecond,
+		MaxDelay:    30 * time.Second,
+		MaxJitter:   time.Second,
+		MaxAttempts: cfg.MaxRetries,
+	}
+	if cfg.Debug {
+		backoff.OnRetry = func(attempt int, err error, wait time.Duration) {
+			fmt.Fprintf(os.Stderr, "[opentrace-sdk] retry %d after %v: %v\n", attempt+1, wait, err)
+		}
+	}
+	breaker := retry.NewCircuitBreaker(5, 60*time.Second)
+	return func(ctx context.Context, fn func(context.Context) error) error {
+		return breaker.Do(ctx, func(ctx context.Context) error {
+			return retry.WithRetry(ctx, backoff, fn)
+		})
+	}
+}
 
 // pipeline owns the SDK's two background goroutines (batcher and exporter)
 // and their orderly shutdown (ADR-005 D1). Nothing else in the SDK may spawn
@@ -50,6 +77,7 @@ func newPipeline(cfg *Config, buf *eventBuffer, res resourceInfo, onDrop func(in
 			FlushCh:            flushCh,
 			Resource:           res,
 			OnDrop:             onDrop,
+			Send:               newSendPolicy(cfg),
 		}),
 		batcherDone: make(chan struct{}),
 		batcherFin:  make(chan struct{}),
