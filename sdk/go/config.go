@@ -35,14 +35,17 @@ type Config struct {
 
 func defaultConfig() *Config {
 	return &Config{
-		ServiceVersion:     "unknown",
-		Environment:        "production",
-		MinLevel:           LevelInfo,
-		BatchSize:          500,
-		BatchInterval:      2 * time.Second,
-		MaxBatchBytes:      1 * 1024 * 1024, // 1 MB
-		BufferSize:         10000,
-		HTTPTimeout:        10 * time.Second,
+		ServiceVersion: "unknown",
+		Environment:    "production",
+		MinLevel:       LevelInfo,
+		BatchSize:      500,
+		BatchInterval:  2 * time.Second,
+		MaxBatchBytes:  1 * 1024 * 1024, // 1 MB
+		BufferSize:     10000,
+		// 8s, deliberately below the collector's 10s WriteTimeout: the
+		// client must time out first so retries key off a clean client-side
+		// deadline instead of a half-written server response (ADR-006).
+		HTTPTimeout:        8 * time.Second,
 		MaxRetries:         5,
 		Headers:            map[string]string{},
 		CompressionEnabled: true,
@@ -83,8 +86,22 @@ func (c *Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// loadFromEnv populates zero-value Config fields from environment variables.
-// Programmatic options (already set) take priority — this only fills gaps.
+// loadFromEnv overlays environment variables onto the defaults. It runs
+// BEFORE functional options are applied (see New), so the effective
+// precedence is: programmatic options > environment variables > defaults.
+//
+//	| Env var                      | Config field      | Type      |
+//	|------------------------------|-------------------|-----------|
+//	| OPENTRACE_COLLECTOR_ENDPOINT | CollectorEndpoint | string    |
+//	| OPENTRACE_SERVICE_NAME       | ServiceName       | string    |
+//	| OPENTRACE_SERVICE_VERSION    | ServiceVersion    | string    |
+//	| OPENTRACE_ENVIRONMENT        | Environment       | string    |
+//	| OPENTRACE_MIN_LEVEL          | MinLevel          | level name|
+//	| OPENTRACE_BATCH_SIZE         | BatchSize         | int       |
+//	| OPENTRACE_BATCH_INTERVAL_MS  | BatchInterval     | int (ms)  |
+//	| OPENTRACE_BUFFER_SIZE        | BufferSize        | int       |
+//	| OPENTRACE_HTTP_TIMEOUT_MS    | HTTPTimeout       | int (ms)  |
+//	| OPENTRACE_DEBUG              | Debug             | true/1    |
 func loadFromEnv(cfg *Config) {
 	if cfg.CollectorEndpoint == "" {
 		cfg.CollectorEndpoint = os.Getenv("OPENTRACE_COLLECTOR_ENDPOINT")

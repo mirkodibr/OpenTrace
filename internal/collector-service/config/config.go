@@ -25,8 +25,8 @@ type Config struct {
 	MaxPayloadBytes int64
 
 	// Database
-	DatabaseURL  string
-	DBMaxConns   int
+	DatabaseURL string
+	DBMaxConns  int
 
 	// Broker
 	RedpandaBrokers   string

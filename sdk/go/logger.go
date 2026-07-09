@@ -17,7 +17,9 @@ package opentrace
 
 import (
 	"context"
+	"os"
 	"sync/atomic"
+	"time"
 )
 
 // Logger is the primary entry point for emitting telemetry. All methods are
@@ -28,39 +30,48 @@ type Logger struct {
 	fields  []Field
 	buffer  *eventBuffer
 	res     resourceInfo
-	dropped atomic.Int64
-	closed  atomic.Bool
+	pipe    *pipeline // nil for nop/test loggers; shared by all children
+	dropped *atomic.Int64
+	closed  *atomic.Bool
 }
 
 // New creates a Logger with the provided options.
 // It returns an error if the configuration is invalid or the exporter cannot
 // be initialised. Goroutines are only started after successful validation.
 func New(opts ...Option) (*Logger, error) {
+	// Precedence (lowest to highest): defaults → environment → options.
+	// Environment is applied before options so an explicit programmatic
+	// option always beats an ambient env var.
 	cfg := defaultConfig()
+	loadFromEnv(cfg)
 	for _, o := range opts {
 		o(cfg)
 	}
-	loadFromEnv(cfg)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
 	buf := newEventBuffer(cfg.BufferSize)
 	l := &Logger{
-		level:  cfg.MinLevel,
-		fields: nil,
-		buffer: buf,
-		res:    captureResource(cfg),
+		level:   cfg.MinLevel,
+		fields:  nil,
+		buffer:  buf,
+		res:     captureResource(cfg),
+		dropped: &atomic.Int64{},
+		closed:  &atomic.Bool{},
 	}
-	// TODO (Day 25): wire up the background exporter goroutine here.
+	l.pipe = newPipeline(cfg, buf, l.res, func(n int64) { l.dropped.Add(n) })
+	l.pipe.start()
 	return l, nil
 }
 
 // NewNop returns a Logger that discards all events. Useful in tests.
 func NewNop() *Logger {
 	return &Logger{
-		level:  LevelFatal + 1, // above fatal → every level check fails fast
-		buffer: newEventBuffer(1),
+		level:   LevelFatal + 1, // above fatal → every level check fails fast
+		buffer:  newEventBuffer(1),
+		dropped: &atomic.Int64{},
+		closed:  &atomic.Bool{},
 	}
 }
 
@@ -76,12 +87,18 @@ func (l *Logger) Warn(msg string, fields ...Field) { l.log(LevelWarn, msg, field
 // Error emits an error-level log event.
 func (l *Logger) Error(msg string, fields ...Field) { l.log(LevelError, msg, fields) }
 
-// Fatal emits a fatal-level log event. Unlike other levels, Fatal calls
-// os.Exit(1) after the event is enqueued (best-effort delivery).
+// Fatal emits a fatal-level log event, makes a best-effort attempt to flush
+// it (3-second cap), and then calls os.Exit(1).
 func (l *Logger) Fatal(msg string, fields ...Field) {
 	l.log(LevelFatal, msg, fields)
-	// TODO: flush synchronously before exit
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_ = l.Shutdown(ctx)
+	cancel()
+	osExit(1)
 }
+
+// osExit is swappable so tests can observe Fatal without killing the process.
+var osExit = os.Exit
 
 // With returns a child Logger with the provided fields pre-set on every
 // subsequent call. The parent Logger is unmodified.
@@ -90,10 +107,13 @@ func (l *Logger) With(fields ...Field) *Logger {
 	copy(merged, l.fields)
 	copy(merged[len(l.fields):], fields)
 	return &Logger{
-		level:  l.level,
-		fields: merged,
-		buffer: l.buffer,
-		res:    l.res,
+		level:   l.level,
+		fields:  merged,
+		buffer:  l.buffer,
+		res:     l.res,
+		pipe:    l.pipe,
+		dropped: l.dropped,
+		closed:  l.closed,
 	}
 }
 
@@ -111,15 +131,15 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 	return l.With(extra...)
 }
 
-// Shutdown flushes all buffered events and waits for in-flight exports to
-// complete within the context deadline. It is safe to call more than once.
+// Shutdown gates all producers, flushes buffered events, and waits for
+// in-flight exports to complete within the context deadline. It is
+// idempotent; concurrent and repeated calls share the first call's result.
 func (l *Logger) Shutdown(ctx context.Context) error {
-	if !l.closed.CompareAndSwap(false, true) {
-		return nil // already shut down
+	l.closed.Store(true) // gate producers before draining (ADR-005 ordering)
+	if l.pipe == nil {
+		return nil // nop/test logger — nothing to drain
 	}
-	// TODO (Day 33): implement full drain sequence.
-	_ = ctx
-	return nil
+	return l.pipe.stop(ctx)
 }
 
 // DroppedCount returns the cumulative number of events dropped due to a full
@@ -139,6 +159,7 @@ func (l *Logger) log(level Level, msg string, fields []Field) {
 	evt := acquireEvent()
 	evt.Level = level
 	evt.Message = msg
+	evt.Timestamp = time.Now()
 	// Merge pre-set fields with call-site fields.
 	evt.Fields = append(evt.Fields[:0], l.fields...)
 	evt.Fields = append(evt.Fields, fields...)

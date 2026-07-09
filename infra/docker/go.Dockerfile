@@ -10,10 +10,13 @@ ENV CGO_ENABLED=0 \
 
 WORKDIR /src
 
-# Cache module downloads separately from source compilation
+# Cache module downloads separately from source compilation.
+# sdk/go/go.mod is required because the root module replaces the SDK
+# dependency with the in-repo path (see root go.mod).
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=bind,source=go.mod,target=go.mod \
     --mount=type=bind,source=go.sum,target=go.sum \
+    --mount=type=bind,source=sdk/go/go.mod,target=sdk/go/go.mod \
     go mod download
 
 # Compile the requested service binary

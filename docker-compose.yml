@@ -1,4 +1,4 @@
-name: opentrace
+﻿name: opentrace
 
 networks:
   backend:
@@ -15,7 +15,7 @@ volumes:
 services:
 
   # ---------------------------------------------------------------------------
-  # PostgreSQL — relational store for logs and metadata
+  # PostgreSQL â€” relational store for logs and metadata
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16.3-alpine
@@ -41,7 +41,7 @@ services:
           cpus: "1.0"
 
   # ---------------------------------------------------------------------------
-  # ClickHouse — columnar analytics store for high-throughput telemetry
+  # ClickHouse â€” columnar analytics store for high-throughput telemetry
   # ---------------------------------------------------------------------------
   clickhouse:
     image: clickhouse/clickhouse-server:24.6-alpine
@@ -67,7 +67,7 @@ services:
           cpus: "2.0"
 
   # ---------------------------------------------------------------------------
-  # Redpanda — Kafka-compatible message broker for async ingestion
+  # Redpanda â€” Kafka-compatible message broker for async ingestion
   # ---------------------------------------------------------------------------
   redpanda:
     image: redpandadata/redpanda:v24.1.8
@@ -102,7 +102,7 @@ services:
           cpus: "1.0"
 
   # ---------------------------------------------------------------------------
-  # Redpanda Console — web UI for inspecting topics
+  # Redpanda Console â€” web UI for inspecting topics
   # ---------------------------------------------------------------------------
   redpanda-console:
     image: redpandadata/console:v2.6.0
@@ -124,12 +124,12 @@ services:
           cpus: "0.5"
 
   # ---------------------------------------------------------------------------
-  # Collector Service — receives SDK telemetry, publishes to Redpanda
+  # Collector Service â€” receives SDK telemetry, publishes to Redpanda
   # ---------------------------------------------------------------------------
   collector-service:
     build:
       context: .
-      dockerfile: infra/docker/Dockerfile.go
+      dockerfile: infra/docker/go.Dockerfile
       args:
         SERVICE: collector-service
     restart: unless-stopped
@@ -161,12 +161,12 @@ services:
           cpus: "1.0"
 
   # ---------------------------------------------------------------------------
-  # Query API — serves filtered telemetry queries to the React frontend
+  # Query API â€” serves filtered telemetry queries to the React frontend
   # ---------------------------------------------------------------------------
   query-api:
     build:
       context: .
-      dockerfile: infra/docker/Dockerfile.go
+      dockerfile: infra/docker/go.Dockerfile
       args:
         SERVICE: query-api
     restart: unless-stopped
@@ -196,7 +196,7 @@ services:
           cpus: "1.0"
 
   # ---------------------------------------------------------------------------
-  # OpenTrace UI — React SPA served via Nginx
+  # OpenTrace UI â€” React SPA served via Nginx
   # ---------------------------------------------------------------------------
   opentrace-ui:
     build:

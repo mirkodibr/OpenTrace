@@ -42,15 +42,15 @@ func (r *PostgresLogReadRepository) QueryLogs(ctx context.Context, params *handl
 	var events []schema.LogEvent
 	for rows.Next() {
 		var (
-			e               schema.LogEvent
-			id              int64
-			receivedAt      time.Time
-			severityText    *string
-			traceID         *string
-			spanID          *string
+			e                schema.LogEvent
+			id               int64
+			receivedAt       time.Time
+			severityText     *string
+			traceID          *string
+			spanID           *string
 			resourceAttrsRaw []byte
-			logAttrsRaw     []byte
-			schemaURL       *string
+			logAttrsRaw      []byte
+			schemaURL        *string
 		)
 
 		if err := rows.Scan(

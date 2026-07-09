@@ -1,0 +1,3 @@
+# k6 handleSummary writes summary.json here; keep the directory, not results.
+*
+!.gitignore
