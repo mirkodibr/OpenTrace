@@ -4,7 +4,9 @@
 
 [![Go Version](https://img.shields.io/badge/go-1.22+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
-[![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-compatible-f5a623.svg)](https://opentelemetry.io)
+[![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-semantic%20conventions-f5a623.svg)](https://opentelemetry.io)
+
+**Status:** Active development — Day 30 of 35, Phase 2 (SDK Development). Phase 0 (architecture) and Phase 1 (Log Ingestion MVP) are complete and merged to `main`; the Go SDK and backend integration are in progress.
 
 ---
 
@@ -16,7 +18,7 @@ OpenTrace is built for teams that need:
 - **Data residency guarantees** — your telemetry never leaves your infrastructure
 - **Predictable costs** — storage and compute scale with your infrastructure, not your event volume
 - **Full query flexibility** — raw SQL access to ClickHouse and PostgreSQL, not a locked-down query language
-- **OpenTelemetry compatibility** — wire-compatible with the OTEL ecosystem; existing instrumentation works without changes
+- **OpenTelemetry alignment** — data model targets OTEL Semantic Conventions v1.24+; OTLP wire-level compatibility is planned but not yet validated end-to-end
 
 ---
 
@@ -24,11 +26,11 @@ OpenTrace is built for teams that need:
 
 | Tenet | Implementation |
 |-------|---------------|
-| **High write throughput** | Async ingestion via Redpanda decouples SDK clients from storage writes; ClickHouse columnar engine handles 50k+ events/sec bulk inserts |
-| **Sub-100ms query latency** | Composite indexes on (service, severity, timestamp) enable index-only scans; keyset pagination avoids COUNT(*) over large result sets |
+| **High write throughput** | Async ingestion via Redpanda decouples SDK clients from storage writes; ClickHouse's columnar engine is designed for high-throughput bulk inserts (bulk-insert throughput not yet benchmarked at production scale) |
+| **Low query latency** | Composite indexes on (service, severity, timestamp) enable index-only scans; keyset pagination avoids COUNT(*) over large result sets. Targets sub-100ms on typical queries; measured p95 under 200 concurrent k6 VUs on constrained dev hardware was ~5s — see [performance-baseline.md](docs/internal/runbooks/performance-baseline.md) for the full breakdown and caveats |
 | **Operational simplicity** | Single `docker compose up` starts the full stack; Kubernetes manifests and Helm charts for production deployment |
 | **Schema-forward design** | OpenTelemetry Semantic Conventions v1.24+ compliance for all wire formats; versioned Protobuf definitions for stable API contracts |
-| **Zero SDK overhead** | Go SDK designed for 0 heap allocations per log call on the hot path; background goroutine handles all I/O |
+| **Zero SDK overhead** | Go SDK hot path measured at **0 heap allocations per log call**, enforced by a build-breaking allocation-budget test; ~5–7M calls/s single-goroutine throughput. Background goroutine handles all I/O — see [performance-baseline.md](docs/internal/runbooks/performance-baseline.md) |
 
 ---
 
@@ -37,9 +39,9 @@ OpenTrace is built for teams that need:
 | Component | Technology | Rationale |
 |-----------|-----------|-----------|
 | Backend services | Go 1.22+ | Predictable latency, excellent concurrency primitives, small Docker images |
-| Primary storage | ClickHouse 24.x | Columnar MergeTree engine; 10–100× better compression and query speed vs row stores for time-series data |
+| Primary storage | ClickHouse 24.x | Columnar MergeTree engine — columnar stores are commonly cited at 10–100× better compression/query speed vs row stores for time-series data (industry benchmark; not yet measured on OpenTrace's own dataset) |
 | Secondary storage | PostgreSQL 16 + TimescaleDB | JSONB flexibility, rich indexing, excellent operational tooling |
-| Message queue | Redpanda | Kafka-compatible; single binary, no JVM, 3× lower latency than Kafka for small batches |
+| Message queue | Redpanda | Kafka-compatible; single binary, no JVM. Redpanda's own benchmarks cite lower latency than Kafka for small batches — not independently verified by this project |
 | Frontend | React 19 + TypeScript + Vite | Type-safe, fast HMR, TanStack Router for type-safe navigation |
 | Monorepo tooling | Go Workspaces (go.work) | Independent SDK versioning while sharing internal packages |
 
@@ -64,8 +66,8 @@ OpenTrace is built for teams that need:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  SDK Instrumentation Layer                                               │
 │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐      │
-│  │  Go SDK           │  │  (future) JS SDK  │  │  OTEL Collector  │      │
-│  │  opentrace-go     │  │  opentrace-js     │  │  (compatible)    │      │
+│  │  Go SDK           │  │  (planned) JS SDK │  │  OTEL Collector  │      │
+│  │  opentrace-go     │  │  opentrace-js     │  │  (planned)       │      │
 │  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘      │
 │           │ HTTP/gRPC            │ HTTP/gRPC            │ HTTP/gRPC       │
 └───────────┼──────────────────────┼──────────────────────┼────────────────┘
@@ -138,8 +140,8 @@ OpenTrace is built for teams that need:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/opentrace/opentrace.git
-cd opentrace
+git clone https://github.com/mirkodibr/OpenTrace.git
+cd OpenTrace
 
 # 2. Copy and configure environment
 cp .env.example .env
@@ -206,13 +208,23 @@ opentrace/
 
 ---
 
+## Roadmap
+
+- **Phase 2 (in progress, Day 30/35)** — Go SDK, backend integration, performance hardening, load testing
+- **JS/TS SDK** — planned, not started
+- **OTLP wire compatibility** — planned; current wire format is OpenTrace-native (see [ADR-006](docs/internal/adr/006-sdk-wire-format.md))
+- **Phase 3** — auth layer, production deployment hardening (see [prompt library](opentrace_prompt_library.md) for the full day-by-day plan)
+
+---
+
 ## Documentation
 
 - [Architecture Decision Records](docs/internal/adr/) — Design decisions and rationale
 - [API Reference](api/v1/openapi/) — OpenAPI 3.1 specifications
-- [SDK Documentation](sdk/go/README.md) — Go SDK integration guide
-- [Contributing Guide](docs/public/contributing.md) — How to contribute
-- [Runbooks](docs/internal/runbooks/) — Operational procedures
+- [SDK source](sdk/go/) — Go SDK package (dedicated integration guide not yet written)
+- [Runbooks](docs/internal/runbooks/) — Operational procedures, including the [measured performance baseline](docs/internal/runbooks/performance-baseline.md)
+
+> Contributing guide is not yet written — `docs/public/` doesn't exist yet. Open an issue if you'd like to contribute before it lands.
 
 ---
 
