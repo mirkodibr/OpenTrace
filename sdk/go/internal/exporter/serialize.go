@@ -9,8 +9,13 @@ import (
 	"github.com/opentrace/opentrace-go/internal/wire"
 )
 
-// serialize renders a batch into the collector wire format (ADR-005 D4,
-// field mapping in ADR-006) and writes it to buf:
+// serializeJSON renders a batch into the collector wire format using
+// encoding/json + a map[string]interface{} intermediate. This was the Day 25
+// baseline; Day 32 replaced the exporter's hot call with the hand-written
+// writer in writer.go after benchmarks showed a meaningful win (see
+// docs/internal/runbooks/sdk-profiling.md). serializeJSON is kept as the
+// equivalence-test oracle in serialize_equivalence_test.go — the hand
+// written writer must always produce output that decodes identically.
 //
 //	{"events":[{ "timestamp": <RFC3339Nano>, "service_name": ...,
 //	             "severity": <lowercase level>, "body": <message>,
@@ -21,11 +26,7 @@ import (
 // semantics; trace_id/span_id fields are lifted to top level. Durations are
 // serialised as float64 milliseconds (matching the duration_ms convention
 // used across the platform).
-//
-// This is the correctness-first baseline using encoding/json; it runs only
-// on the exporter goroutine, never on the hot path. Day 32 replaces the
-// inner loop with a hand-written writer if benchmarks justify it.
-func serialize(buf *bytes.Buffer, batch []*wire.LogEvent, res wire.Resource) error {
+func serializeJSON(buf *bytes.Buffer, batch []*wire.LogEvent, res wire.Resource) error {
 	resourceAttrs := map[string]interface{}{
 		"service.name":           res.ServiceName,
 		"service.version":        res.ServiceVersion,
