@@ -59,6 +59,16 @@ func WithMaxRetries(n int) Option {
 	return func(c *Config) { c.MaxRetries = n }
 }
 
+// WithShutdownTimeout sets the default deadline Shutdown applies when the
+// caller's context carries no deadline of its own (default 15s). It also
+// bounds RegisterSignalHandler's shutdown call. During shutdown the SDK
+// reduces its retry budget to 2 attempts regardless of WithMaxRetries,
+// prioritising a timely shutdown over exhausting the full retry policy —
+// see the shutdown timeout analysis in config.go.
+func WithShutdownTimeout(d time.Duration) Option {
+	return func(c *Config) { c.ShutdownTimeout = d }
+}
+
 // WithHeader adds a custom header to all exporter HTTP requests. Call multiple
 // times to add multiple headers (e.g. API keys, auth tokens).
 func WithHeader(key, value string) Option {

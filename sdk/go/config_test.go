@@ -50,6 +50,7 @@ func TestEnvFallback(t *testing.T) {
 	t.Setenv("OPENTRACE_BATCH_INTERVAL_MS", "750")
 	t.Setenv("OPENTRACE_BUFFER_SIZE", "2048")
 	t.Setenv("OPENTRACE_HTTP_TIMEOUT_MS", "4000")
+	t.Setenv("OPENTRACE_SHUTDOWN_TIMEOUT_MS", "5000")
 	t.Setenv("OPENTRACE_DEBUG", "true")
 
 	cfg := buildConfig()
@@ -79,6 +80,9 @@ func TestEnvFallback(t *testing.T) {
 	}
 	if cfg.HTTPTimeout != 4*time.Second {
 		t.Errorf("HTTPTimeout = %v", cfg.HTTPTimeout)
+	}
+	if cfg.ShutdownTimeout != 5*time.Second {
+		t.Errorf("ShutdownTimeout = %v", cfg.ShutdownTimeout)
 	}
 	if !cfg.Debug {
 		t.Error("Debug = false, want true")

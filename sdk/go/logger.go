@@ -18,7 +18,9 @@ package opentrace
 import (
 	"context"
 	"os"
+	"os/signal"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -26,13 +28,14 @@ import (
 // safe for concurrent use. A Logger must be created with New; the zero value
 // is not valid.
 type Logger struct {
-	level   Level
-	fields  []Field
-	buffer  *eventBuffer
-	res     resourceInfo
-	pipe    *pipeline // nil for nop/test loggers; shared by all children
-	dropped *atomic.Int64
-	closed  *atomic.Bool
+	level           Level
+	fields          []Field
+	buffer          *eventBuffer
+	res             resourceInfo
+	pipe            *pipeline // nil for nop/test loggers; shared by all children
+	dropped         *atomic.Int64
+	closed          *atomic.Bool
+	shutdownTimeout time.Duration
 }
 
 // New creates a Logger with the provided options.
@@ -53,14 +56,15 @@ func New(opts ...Option) (*Logger, error) {
 
 	buf := newEventBuffer(cfg.BufferSize)
 	l := &Logger{
-		level:   cfg.MinLevel,
-		fields:  nil,
-		buffer:  buf,
-		res:     captureResource(cfg),
-		dropped: &atomic.Int64{},
-		closed:  &atomic.Bool{},
+		level:           cfg.MinLevel,
+		fields:          nil,
+		buffer:          buf,
+		res:             captureResource(cfg),
+		dropped:         &atomic.Int64{},
+		closed:          &atomic.Bool{},
+		shutdownTimeout: cfg.ShutdownTimeout,
 	}
-	l.pipe = newPipeline(cfg, buf, l.res, func(n int64) { l.dropped.Add(n) })
+	l.pipe = newPipeline(cfg, buf, l.res, l.dropped)
 	l.pipe.start()
 	return l, nil
 }
@@ -107,13 +111,14 @@ func (l *Logger) With(fields ...Field) *Logger {
 	copy(merged, l.fields)
 	copy(merged[len(l.fields):], fields)
 	return &Logger{
-		level:   l.level,
-		fields:  merged,
-		buffer:  l.buffer,
-		res:     l.res,
-		pipe:    l.pipe,
-		dropped: l.dropped,
-		closed:  l.closed,
+		level:           l.level,
+		fields:          merged,
+		buffer:          l.buffer,
+		res:             l.res,
+		pipe:            l.pipe,
+		dropped:         l.dropped,
+		closed:          l.closed,
+		shutdownTimeout: l.shutdownTimeout,
 	}
 }
 
@@ -134,12 +139,44 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 // Shutdown gates all producers, flushes buffered events, and waits for
 // in-flight exports to complete within the context deadline. It is
 // idempotent; concurrent and repeated calls share the first call's result.
+//
+// If ctx carries no deadline, Shutdown applies WithShutdownTimeout's value
+// (default 15s) itself, so logger.Shutdown(context.Background()) still
+// returns promptly rather than blocking indefinitely if the collector is
+// unreachable. Pass a context.WithTimeout explicitly to use a different
+// bound for one call.
 func (l *Logger) Shutdown(ctx context.Context) error {
 	l.closed.Store(true) // gate producers before draining (ADR-005 ordering)
 	if l.pipe == nil {
 		return nil // nop/test logger — nothing to drain
 	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, l.shutdownTimeout)
+		defer cancel()
+	}
 	return l.pipe.stop(ctx)
+}
+
+// RegisterSignalHandler installs a SIGINT/SIGTERM handler that calls
+// Shutdown (bounded by WithShutdownTimeout) when the process receives a
+// termination signal, then restores the default signal behaviour so a
+// second Ctrl-C forces an immediate exit. It returns a stop function the
+// caller may use to deregister the handler early (mainly useful in tests).
+//
+// This is entirely optional: applications that already own a signal
+// handler and a shutdown sequence should call logger.Shutdown(ctx) directly
+// from their own handler instead of using this method — installing two
+// handlers is harmless (both call the idempotent Shutdown) but redundant.
+func (l *Logger) RegisterSignalHandler() (stop func()) {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), l.shutdownTimeout)
+		defer shutdownCancel()
+		_ = l.Shutdown(shutdownCtx)
+	}()
+	return cancel
 }
 
 // DroppedCount returns the cumulative number of events dropped due to a full
