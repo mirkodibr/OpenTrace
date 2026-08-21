@@ -82,6 +82,19 @@ func fieldValue(f *wire.Field) interface{} {
 	case wire.TypeDuration:
 		// Milliseconds with sub-ms precision, e.g. 1500000ns -> 1.5
 		return float64(f.Int64Val) / float64(time.Millisecond)
+	case wire.TypeObject:
+		children, _ := f.Interface.([]wire.Field)
+		obj := make(map[string]interface{}, len(children))
+		for i := range children {
+			obj[children[i].Key] = fieldValue(&children[i]) // recursive
+		}
+		return obj
+	case wire.TypeStringSlice:
+		values, _ := f.Interface.([]string)
+		return values
+	case wire.TypeMap:
+		m, _ := f.Interface.(map[string]string)
+		return m
 	case wire.TypeAny:
 		return anyValue(f.Interface)
 	default:
