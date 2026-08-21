@@ -124,7 +124,77 @@ func main() {
 	}
 	pass("field integrity: attributes preserved end to end")
 
+	// STEP 5 — NESTED FIELDS: a second logger sends one event with
+	// Object/StringSlice/Map fields (Day 31) and we verify the nested
+	// structure survives serialisation, collector sanitisation, and
+	// storage intact.
+	verifyNestedFields(*collector, *queryAPI, *waitBudget)
+
 	fmt.Println("\nALL CHECKS PASSED")
+}
+
+func verifyNestedFields(collector, queryAPI string, waitBudget time.Duration) {
+	nestedID := fmt.Sprintf("e2e-nested-%d", time.Now().UnixNano())
+	logger, err := opentrace.New(
+		opentrace.WithCollectorEndpoint(collector),
+		opentrace.WithServiceName("e2e-verify"),
+		opentrace.WithBatchSize(1),
+		opentrace.WithBatchInterval(200*time.Millisecond),
+	)
+	if err != nil {
+		fail("nested-field SDK init: %v", err)
+	}
+	logger.Info("e2e nested verification "+nestedID,
+		opentrace.String("e2e_id", nestedID),
+		opentrace.Object("user",
+			opentrace.String("id", "u_42"),
+			opentrace.Object("permissions", opentrace.Bool("billing", true)),
+		),
+		opentrace.StringSlice("tags", []string{"vip", "beta"}),
+		opentrace.Map("labels", map[string]string{"tier": "gold"}),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := logger.Shutdown(ctx); err != nil {
+		fail("nested-field SDK shutdown: %v", err)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	deadline := time.Now().Add(waitBudget)
+	var found int
+	var resp queryResponse
+	for {
+		found, resp = countEvents(client, queryAPI, nestedID)
+		if found >= 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if found == 0 {
+		fail("nested fields: event not found within %s", waitBudget)
+	}
+
+	attrs := resp.Data[0].LogAttributes
+	user, ok := attrs["user"].(map[string]any)
+	if !ok {
+		fail("nested fields: user attribute is not a nested object: %T", attrs["user"])
+	}
+	if user["id"] != "u_42" {
+		fail("nested fields: user.id = %v, want u_42", user["id"])
+	}
+	perms, ok := user["permissions"].(map[string]any)
+	if !ok || perms["billing"] != true {
+		fail("nested fields: user.permissions.billing = %v", user["permissions"])
+	}
+	tags, ok := attrs["tags"].([]any)
+	if !ok || len(tags) != 2 || tags[0] != "vip" {
+		fail("nested fields: tags = %v", attrs["tags"])
+	}
+	labels, ok := attrs["labels"].(map[string]any)
+	if !ok || labels["tier"] != "gold" {
+		fail("nested fields: labels = %v", attrs["labels"])
+	}
+	pass("nested fields: Object/StringSlice/Map survived serialisation + storage intact")
 }
 
 // countEvents pages through the query API counting events tagged uniqueID.

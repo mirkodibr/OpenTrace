@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref to avoid burning CI minutes on
+# stale pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.22"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # go: vet + race tests for both workspace modules (root backend services
+  # + sdk/go). `go test ./...` from the repo root does NOT traverse the
+  # sdk/go module even under go.work — `./...` expands within the current
+  # module's own tree only — so each module gets its own steps.
+  # ---------------------------------------------------------------------
+  go:
+    name: go (vet + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            sdk/go/go.sum
+
+      - name: vet (root module)
+        run: go vet ./...
+
+      - name: vet (sdk/go module)
+        working-directory: sdk/go
+        run: go vet ./...
+
+      - name: test -race (root module)
+        run: go test -race -timeout 120s ./...
+
+      - name: test -race (sdk/go module)
+        working-directory: sdk/go
+        run: go test -race -timeout 120s ./...
+
+      - name: test allocation budget (non-race)
+        working-directory: sdk/go
+        # The AllocsPerRun budget tests (alloc_test.go) are tagged
+        # `//go:build !race` — allocation counts are unreliable under the
+        # race detector, so they never execute in the -race step above.
+        # This step is what actually enforces the 0-alloc hot-path
+        # guarantee in CI, not just documents it.
+        run: go test -timeout 60s -run TestAllocBudget -v ./...
+
+      - name: build (root module, including examples and cmd/e2e-verify)
+        run: go build ./...
+
+      - name: build (sdk/go module, including cmd/loadtest)
+        working-directory: sdk/go
+        run: go build ./...
+
+  # ---------------------------------------------------------------------
+  # go-integration: PostgreSQL-backed repository tests behind the
+  # `integration` build tag. ubuntu-latest ships Docker, but these tests
+  # read TEST_DATABASE_URL directly (see logs_postgres_integration_test.go)
+  # rather than spinning up their own container, so a GitHub Actions
+  # Postgres *service* container is simpler and faster than testcontainers
+  # here. Kept as its own job so a unit-test failure in `go` surfaces fast
+  # without waiting on the Postgres container to boot and be seeded.
+  # ---------------------------------------------------------------------
+  go-integration:
+    name: go (integration tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.3-alpine
+        env:
+          POSTGRES_USER: opentrace
+          POSTGRES_PASSWORD: opentrace
+          POSTGRES_DB: opentrace
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U opentrace -d opentrace"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://opentrace:opentrace@localhost:5432/opentrace?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: apply schema
+        run: |
+          psql "$TEST_DATABASE_URL" -f infra/postgres/init/001_logs_schema.sql
+        env:
+          PGPASSWORD: opentrace
+
+      - name: test -race -tags integration
+        run: go test -race -tags=integration -timeout 120s ./...
+
+  # ---------------------------------------------------------------------
+  # sdk-bench-smoke: not a performance gate (benchmark numbers are
+  # inherently noisy on shared CI runners) — this is a smoke test that the
+  # benchmark suite still compiles and runs to completion after any code
+  # change. The allocation budget itself is enforced by the `go` job's
+  # AllocsPerRun step above, which is a pass/fail assertion, not a noisy
+  # timing number.
+  # ---------------------------------------------------------------------
+  sdk-bench-smoke:
+    name: sdk benchmark smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: sdk/go/go.sum
+
+      - name: run every benchmark for 100 iterations
+        working-directory: sdk/go
+        run: go test -bench=. -benchtime=100x -benchmem -run=^$ ./...
+
+  # ---------------------------------------------------------------------
+  # web: React/TypeScript frontend — type-check, lint, and production
+  # build, mirroring the Makefile's web-typecheck/web-build targets.
+  # ---------------------------------------------------------------------
+  web:
+    name: web (typecheck + lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build

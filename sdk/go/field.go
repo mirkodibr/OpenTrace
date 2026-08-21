@@ -38,3 +38,21 @@ func Err(err error) Field { return wire.Err(err) }
 // Any constructs a Field for an arbitrary value. One allocation (interface
 // boxing). This is the escape hatch — prefer typed constructors.
 func Any(key string, value interface{}) Field { return wire.Any(key, value) }
+
+// Object constructs a nested-object Field from child fields, e.g.:
+//
+//	logger.Info("user action",
+//	    opentrace.Object("user",
+//	        opentrace.String("id", userID),
+//	        opentrace.Object("permissions", opentrace.Bool("billing", true)),
+//	    ),
+//	)
+//
+// The collector flattens nesting deeper than 5 levels to dot-notation keys.
+func Object(key string, fields ...Field) Field { return wire.Object(key, fields...) }
+
+// StringSlice constructs a Field holding an array of strings.
+func StringSlice(key string, values []string) Field { return wire.StringSlice(key, values) }
+
+// Map constructs a Field from a string map (one-level nested object).
+func Map(key string, m map[string]string) Field { return wire.Map(key, m) }

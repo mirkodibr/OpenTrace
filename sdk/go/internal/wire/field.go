@@ -19,6 +19,9 @@ const (
 	TypeDuration
 	TypeError
 	TypeAny
+	TypeObject      // nested object: Interface holds []Field
+	TypeStringSlice // Interface holds []string
+	TypeMap         // Interface holds map[string]string
 )
 
 // Field is a typed key-value pair for structured log attributes.
@@ -79,4 +82,26 @@ func Err(err error) Field {
 // boxing). This is the escape hatch — prefer typed constructors.
 func Any(key string, value interface{}) Field {
 	return Field{Key: key, Type: TypeAny, Interface: value}
+}
+
+// Object constructs a nested-object Field from child fields. Nesting may be
+// arbitrary in the SDK; the collector flattens anything deeper than 5
+// levels to dot-notation keys (see collector sanitisation). Budget: 1-2
+// allocs/op (the child slice boxing) — nested structure cannot be expressed
+// without it.
+func Object(key string, fields ...Field) Field {
+	return Field{Key: key, Type: TypeObject, Interface: fields}
+}
+
+// StringSlice constructs a Field holding an array of strings. 1 alloc
+// (slice header boxing). The caller must not mutate values afterwards.
+func StringSlice(key string, values []string) Field {
+	return Field{Key: key, Type: TypeStringSlice, Interface: values}
+}
+
+// Map constructs a Field from a string map, serialised as a one-level
+// nested object. 1 alloc (map header boxing). The caller must not mutate
+// m afterwards.
+func Map(key string, m map[string]string) Field {
+	return Field{Key: key, Type: TypeMap, Interface: m}
 }

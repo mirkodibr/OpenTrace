@@ -62,6 +62,20 @@ func IngestLogs(repo LogRepository, logger *slog.Logger, maxBatchSize int, maxPa
 			return
 		}
 
+		// Sanitise user-supplied attributes at the trust boundary: enforce
+		// nesting depth, key count/charset, value length, and reserved
+		// namespaces regardless of which SDK (or curl) produced the batch.
+		for i := range req.Events {
+			clean, warnings := sanitizeAttributes(req.Events[i].LogAttributes)
+			req.Events[i].LogAttributes = clean
+			for _, warning := range warnings {
+				reqLogger.Warn("attribute sanitised",
+					slog.Int("event_index", i),
+					slog.String("detail", warning),
+				)
+			}
+		}
+
 		if err := repo.BulkInsert(r.Context(), req.Events); err != nil {
 			reqLogger.Error("bulk insert failed", slog.String("error", err.Error()))
 			schema.WriteProblem(w, schema.Problem{

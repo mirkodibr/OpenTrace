@@ -19,15 +19,6 @@ function LogsContent() {
 
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
-  const baseParams = {
-    start_time:   timeRange.start.toISOString(),
-    end_time:     timeRange.end.toISOString(),
-    service_name: serviceName || undefined,
-    level:        (level || undefined) as LogLevel | undefined,
-    keyword:      keyword || undefined,
-    limit:        100,
-  };
-
   const {
     data,
     isLoading,
@@ -46,9 +37,18 @@ function LogsContent() {
   });
 
   const doRefresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: logsKeys.list(baseParams) });
+    queryClient.invalidateQueries({
+      queryKey: logsKeys.list({
+        start_time:   timeRange.start.toISOString(),
+        end_time:     timeRange.end.toISOString(),
+        service_name: serviceName || undefined,
+        level:        (level || undefined) as LogLevel | undefined,
+        keyword:      keyword || undefined,
+        limit:        100,
+      }),
+    });
     setLastRefreshed(new Date());
-  }, [queryClient, baseParams]);
+  }, [queryClient, timeRange, serviceName, level, keyword]);
 
   useAutoRefresh({
     intervalMs: refreshIntervalSec * 1000,

@@ -17,16 +17,17 @@ type Config struct {
 	ServiceName       string
 
 	// Optional with defaults
-	ServiceVersion string
-	Environment    string
-	MinLevel       Level
-	BatchSize      int
-	BatchInterval  time.Duration
-	MaxBatchBytes  int
-	BufferSize     int
-	HTTPTimeout    time.Duration
-	MaxRetries     int
-	Headers        map[string]string
+	ServiceVersion  string
+	Environment     string
+	MinLevel        Level
+	BatchSize       int
+	BatchInterval   time.Duration
+	MaxBatchBytes   int
+	BufferSize      int
+	HTTPTimeout     time.Duration
+	MaxRetries      int
+	ShutdownTimeout time.Duration
+	Headers         map[string]string
 
 	// Advanced
 	CompressionEnabled bool
@@ -45,8 +46,15 @@ func defaultConfig() *Config {
 		// 8s, deliberately below the collector's 10s WriteTimeout: the
 		// client must time out first so retries key off a clean client-side
 		// deadline instead of a half-written server response (ADR-006).
-		HTTPTimeout:        8 * time.Second,
-		MaxRetries:         5,
+		HTTPTimeout: 8 * time.Second,
+		MaxRetries:  5,
+		// 15s balances draining a full buffer against not hanging the
+		// host's own shutdown sequence indefinitely (Day 33 timeout
+		// analysis: worst case a single batch retry cycle is
+		// HTTPTimeout x MaxRetries = 40s, which already exceeds any
+		// reasonable shutdown budget — see the reduced-retry-during-
+		// shutdown policy in pipeline.go).
+		ShutdownTimeout:    15 * time.Second,
 		Headers:            map[string]string{},
 		CompressionEnabled: true,
 	}
@@ -83,6 +91,10 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("http_timeout must be between 1s and 120s, got %s", c.HTTPTimeout))
 	}
 
+	if c.ShutdownTimeout < time.Second || c.ShutdownTimeout > 120*time.Second {
+		errs = append(errs, fmt.Errorf("shutdown_timeout must be between 1s and 120s, got %s", c.ShutdownTimeout))
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -101,6 +113,7 @@ func (c *Config) Validate() error {
 //	| OPENTRACE_BATCH_INTERVAL_MS  | BatchInterval     | int (ms)  |
 //	| OPENTRACE_BUFFER_SIZE        | BufferSize        | int       |
 //	| OPENTRACE_HTTP_TIMEOUT_MS    | HTTPTimeout       | int (ms)  |
+//	| OPENTRACE_SHUTDOWN_TIMEOUT_MS| ShutdownTimeout   | int (ms)  |
 //	| OPENTRACE_DEBUG              | Debug             | true/1    |
 func loadFromEnv(cfg *Config) {
 	if cfg.CollectorEndpoint == "" {
@@ -140,6 +153,11 @@ func loadFromEnv(cfg *Config) {
 	if v := os.Getenv("OPENTRACE_HTTP_TIMEOUT_MS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.HTTPTimeout = time.Duration(n) * time.Millisecond
+		}
+	}
+	if v := os.Getenv("OPENTRACE_SHUTDOWN_TIMEOUT_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.ShutdownTimeout = time.Duration(n) * time.Millisecond
 		}
 	}
 	if v := os.Getenv("OPENTRACE_DEBUG"); v == "true" || v == "1" {
