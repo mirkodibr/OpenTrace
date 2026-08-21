@@ -161,8 +161,20 @@ func (l *Logger) Shutdown(ctx context.Context) error {
 // RegisterSignalHandler installs a SIGINT/SIGTERM handler that calls
 // Shutdown (bounded by WithShutdownTimeout) when the process receives a
 // termination signal, then restores the default signal behaviour so a
-// second Ctrl-C forces an immediate exit. It returns a stop function the
-// caller may use to deregister the handler early (mainly useful in tests).
+// second Ctrl-C forces an immediate exit (signal.NotifyContext's own
+// documented behaviour: the underlying registration is removed as soon as
+// the context is cancelled, by whichever means).
+//
+// The returned stop function is signal.NotifyContext's cancel func, not a
+// side-effect-free deregistration: calling it closes the same Done channel
+// a real signal would, so it ALSO triggers this handler's Shutdown call
+// (idempotent, so this is safe, not harmful — a `defer stop()` right after
+// registration, the standard signal.NotifyContext pattern, doubles as a
+// safety net that drains the logger even if the caller forgets to call
+// Shutdown explicitly). There is no way to distinguish "a real signal
+// arrived" from "stop was called manually" from inside the handler — that
+// is an inherent limitation of context cancellation as a signal, not
+// something this method works around.
 //
 // This is entirely optional: applications that already own a signal
 // handler and a shutdown sequence should call logger.Shutdown(ctx) directly
@@ -182,6 +194,18 @@ func (l *Logger) RegisterSignalHandler() (stop func()) {
 // DroppedCount returns the cumulative number of events dropped due to a full
 // buffer or an open circuit breaker.
 func (l *Logger) DroppedCount() int64 { return l.dropped.Load() }
+
+// BufferUtilization returns the internal event buffer's current occupancy
+// as a fraction of its capacity (0.0-1.0). A nop logger always reports 0.
+// Intended for operational self-monitoring — e.g. the load test in
+// sdk/go/cmd/loadtest samples this to detect approaching buffer saturation
+// before DroppedCount starts climbing.
+func (l *Logger) BufferUtilization() float64 {
+	if l.buffer == nil || cap(l.buffer.ch) == 0 {
+		return 0
+	}
+	return float64(len(l.buffer.ch)) / float64(cap(l.buffer.ch))
+}
 
 // log is the hot path. It must execute in < 500 ns at zero contention.
 func (l *Logger) log(level Level, msg string, fields []Field) {

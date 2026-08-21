@@ -306,17 +306,24 @@ func TestShutdown_DefaultDeadlineAppliesToBackgroundContext(t *testing.T) {
 	}
 }
 
-// TestRegisterSignalHandler_ReturnsCallableStop exercises the registration
-// and deregistration code path. Actually delivering SIGINT/SIGTERM to
-// verify end-to-end signal-triggered shutdown is deliberately not done
-// here: self-signalling is not portable across the platforms this SDK
-// targets (Windows in particular does not support process self-signalling
-// the way POSIX does), so it would make this suite flaky rather than more
-// correct. signal.NotifyContext itself is a stdlib primitive covered by
-// Go's own tests; what this SDK owns and must verify is that registration
-// doesn't leak and that deregistering early doesn't itself trigger a
-// shutdown.
-func TestRegisterSignalHandler_ReturnsCallableStop(t *testing.T) {
+// TestRegisterSignalHandler_StopTriggersShutdown exercises the
+// registration/cancellation code path. Actually delivering a real
+// SIGINT/SIGTERM to verify end-to-end signal-triggered shutdown is
+// deliberately not done here: self-signalling is not portable across the
+// platforms this SDK targets (Windows in particular does not support
+// process self-signalling the way POSIX does), so it would make this
+// suite flaky rather than more correct. signal.NotifyContext itself is a
+// stdlib primitive covered by Go's own tests.
+//
+// What this test verifies is the documented (and, on first look,
+// counter-intuitive) behaviour: the returned stop function is
+// signal.NotifyContext's cancel func, so calling it closes the same Done
+// channel a real signal would — it is NOT a side-effect-free
+// deregistration, and it DOES trigger Shutdown. An earlier version of
+// this test asserted the opposite and only passed by scheduling luck (the
+// async goroutine hadn't run yet at assertion time); polling here instead
+// of a bare immediate check is what makes the assertion meaningful.
+func TestRegisterSignalHandler_StopTriggersShutdown(t *testing.T) {
 	logger, err := New(
 		WithCollectorEndpoint("http://127.0.0.1:1"), // never dialed — no events are logged
 		WithServiceName("signal-handler-test"),
@@ -330,8 +337,13 @@ func TestRegisterSignalHandler_ReturnsCallableStop(t *testing.T) {
 	if stop == nil {
 		t.Fatal("RegisterSignalHandler returned a nil stop function")
 	}
-	stop() // must not panic; deregisters without triggering shutdown
-	if logger.closed.Load() {
-		t.Fatal("deregistering the signal handler must not itself trigger shutdown")
+	stop() // must not panic; closes the handler's context like a real signal would
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !logger.closed.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !logger.closed.Load() {
+		t.Fatal("calling stop() did not trigger Shutdown within 2s")
 	}
 }
